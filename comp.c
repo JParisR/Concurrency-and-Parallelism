@@ -1,4 +1,4 @@
-//e2
+//e3
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -31,6 +31,54 @@ typedef struct {
 	queue	out;
 } ArgsCompresor;
 
+typedef struct {
+	int     chunksTotales;
+	int     chunkSize;
+	queue	in;
+	int     fd;
+} ArgsLector;
+
+typedef struct {
+	int     chunksTotales;
+	queue	out;
+	archive ar;
+} ArgsEscritor;
+
+//Hilo que extrae de la cola out y escribe en el fichero comprimido
+void *hiloEscritor(void *ptr){
+	ArgsEscritor *args = ptr;
+	int i;
+	chunk ch;
+	
+    for(i=0; i<args->chunksTotales; i++) {
+        ch = q_remove(args->out);
+        
+        add_chunk(args->ar, ch);
+        free_chunk(ch);
+    }
+    
+    return NULL;
+}
+
+// Hilo que lee del fichero e inserta en la cola in
+void *hiloLector(void *ptr){
+	ArgsLector *args = ptr;
+	int i,offset;
+	chunk ch;
+    for(i=0; i<args->chunksTotales; i++) {
+        ch = alloc_chunk(args->chunkSize);
+
+        offset=lseek(args->fd, 0, SEEK_CUR);
+
+        ch->size   = read(args->fd, ch->data, args->chunkSize);
+        ch->num    = i;
+        ch->offset = offset;
+        
+        q_insert(args->in, ch);
+    }
+    
+    return NULL;
+}
 
 // take chunks from queue in, run them through process (compress or decompress), send them to queue out
 void worker(queue in, queue out, chunk (*process)(chunk)) {
@@ -70,19 +118,19 @@ void *hiloCompresor(void *ptr) {
 // Compress file taking chunks of opt.size from the input file,
 // inserting them into the in queue, running them using a worker,
 // and sending the output from the out queue into the archive file
-void comp(struct options opt) {	
-    int fd, chunks, i, offset;
+void comp(struct options opt) {
+	
+    int fd, chunks, i;
     struct stat st;
     char comp_file[256];
     archive ar;
-    queue in, out;
-    chunk ch;
+    queue in,out;
        
     if((fd=open(opt.file, O_RDONLY))==-1) {
         printf("Cannot open %s\n", opt.file);
         exit(0);
     }
-    
+
     fstat(fd, &st);
     chunks = st.st_size/opt.size+(st.st_size % opt.size ? 1:0);
 
@@ -98,13 +146,21 @@ void comp(struct options opt) {
     in  = q_create(opt.queue_size);
     out = q_create(opt.queue_size);
 	
+	//Se arranca el hilo lector que extrae bloques del fichero a comprimir
+	//y los inserta en la cola in a la espera de ser compridos
+    ArgsLector argsLector;
+    pthread_t lector;
+	argsLector.chunksTotales = chunks;
+	argsLector.in = in;
+	argsLector.fd = fd;
+	argsLector.chunkSize = opt.size;
+	pthread_create(&lector,NULL,hiloLector,&argsLector);
 
-    int chunksProcesados = 0;
+    //Se arrancan los hilos compresores
+    int chunksProcesados = 0; //Accesible por todos los hilos compresores
     pthread_mutex_t	 mutexChunksProcesados = PTHREAD_MUTEX_INITIALIZER;
     ArgsCompresor *argsList = malloc(opt.num_threads*sizeof(ArgsCompresor));
-    pthread_t *compresorId = malloc(opt.num_threads*sizeof(pthread_t));   
-    
-    //Se arrancan los hilos
+    pthread_t *compresorId = malloc(opt.num_threads*sizeof(pthread_t));      
 	for(i=0; i<opt.num_threads; i++){
 		argsList[i].chunksTotales = chunks;
 		argsList[i].chunksProcesados = &chunksProcesados;
@@ -114,35 +170,28 @@ void comp(struct options opt) {
 		pthread_create(&compresorId[i],NULL,hiloCompresor,&argsList[i]);
 	}
 	
+	//Se arranca el hilo escritor que extrae bloques comprimidos
+	//de la cola out y los escribe en el fichero comprimido de salida
+    ArgsEscritor argsEscritor;
+    pthread_t escritor;
+	argsEscritor.chunksTotales = chunks;
+	argsEscritor.out = out;
+	argsEscritor.ar = ar;
+	pthread_create(&escritor,NULL,hiloEscritor,&argsEscritor);
 	
-    // read input file and send chunks to the in queue
-    for(i=0; i<chunks; i++) {
-        ch = alloc_chunk(opt.size);
 
-        offset=lseek(fd, 0, SEEK_CUR);
-
-        ch->size   = read(fd, ch->data, opt.size);
-        ch->num    = i;
-        ch->offset = offset;
-        
-        q_insert(in, ch);
-    }
-
-    
-	//Esperamos a que terminen los hilos
-	for(i=0; i<opt.num_threads; i++)
+	//Esperamos a que termine el hilo lector
+	pthread_join(lector,NULL);
+	
+	//Esperamos a que terminen los hilos compresores
+	for(i=0; i<opt.num_threads; i++){
 		pthread_join(compresorId[i],NULL);
-	
+	}
 
-    // send chunks to the output archive file
-    for(i=0; i<chunks; i++) {
-        ch = q_remove(out);
-        
-        add_chunk(ar, ch);
-        free_chunk(ch);
-    }
-    
-	//Se libera la memoria
+	//Esperamos a que termine el hilo escritor
+	pthread_join(escritor,NULL);
+  
+  
     free(argsList);
     free(compresorId);
     close_archive_file(ar);
@@ -162,12 +211,12 @@ void decomp(struct options opt) {
     archive ar;
     queue in, out;
     chunk ch;
-    
+
     if((ar=open_archive_file(opt.file))==NULL) {
         printf("Cannot open archive file\n");
         exit(0);
     };
-    
+
     if(opt.out_file) {
         strncpy(uncomp_file, opt.out_file, 255);
     } else {
@@ -178,7 +227,7 @@ void decomp(struct options opt) {
     if((fd=open(uncomp_file, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH))== -1) {
         printf("Cannot create %s: %s\n", uncomp_file, strerror(errno));
         exit(0);
-    } 
+    }
 
     in  = q_create(opt.queue_size);
     out = q_create(opt.queue_size);
@@ -188,10 +237,10 @@ void decomp(struct options opt) {
         ch = get_chunk(ar, i);
         q_insert(in, ch);
     }
-    
+
     // decompress from in to out
     worker(in, out, zdecompress);
-    
+
     // write chunks from output to decompressed file
     for(i=0; i<chunks(ar); i++) {
         ch=q_remove(out);
@@ -199,8 +248,8 @@ void decomp(struct options opt) {
         write(fd, ch->data, ch->size);
         free_chunk(ch);
     }
-    
-    close_archive_file(ar);    
+
+    close_archive_file(ar);
     close(fd);
     q_destroy(in);
     q_destroy(out);
@@ -221,4 +270,5 @@ int main(int argc, char *argv[]) {
     if(opt.compress == COMPRESS) comp(opt);
     else decomp(opt);
 }
+    
     
