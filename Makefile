@@ -1,19 +1,12 @@
-
+CFLAGS=-g
+OBJS=queue.o main.o
+LIBS=-pthread
 CC=gcc
-CFLAGS=-Wall -pthread -g
-LIBS=
-OBJS=swap3.o options.o
 
-PROGS= swap
+all: main
 
-all: $(PROGS)
-
-%.o : %.c
-	$(CC) $(CFLAGS) -c $<
-
-swap: $(OBJS)
+main: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
 
-clean:
-	rm -f $(PROGS) *.o *~
-
+clean: 
+	rm -f *.o main
