@@ -2,7 +2,7 @@
 CC=gcc
 CFLAGS=-Wall -pthread -g
 LIBS=
-OBJS=swap1.o options.o
+OBJS=swap2.o options.o
 
 PROGS= swap
 
