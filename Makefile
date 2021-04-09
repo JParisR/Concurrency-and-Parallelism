@@ -1,12 +1,12 @@
 CFLAGS=-g
-OBJS=queue.o main.o
-LIBS=-pthread
+OBJS=compress.o chunk_archive.o options.o queue.o comp.o
+LIBS=-lz -pthread
 CC=gcc
 
-all: main
+all: comp
 
-main: $(OBJS)
+comp: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
 
 clean: 
-	rm -f *.o main
+	rm -f *.o comp
