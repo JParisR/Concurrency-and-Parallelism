@@ -1,12 +1,10 @@
-CFLAGS=-g
-OBJS=compress.o chunk_archive.o options.o queue.o comp.o
-LIBS=-lz -pthread
-CC=gcc
+OBJS=archive.beam comp.beam compress.beam file_service.beam
+FLAGS=+debug_info
 
-all: comp
+all: $(OBJS)
 
-comp: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
+%.beam: %.erl
+	erlc $(FLAGS) $<
 
-clean: 
-	rm -f *.o comp
+clean:
+	rm -f *.beam
