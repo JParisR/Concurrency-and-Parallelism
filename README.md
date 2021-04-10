@@ -4,7 +4,7 @@ _Set of practices developed in the Concurrency and Paralellism subject. Exercise
 
 ## Authors ✒️
 
-* **Javier París** - [JavierParisR](https://github.com/JavierParisR)
+* **Javier París** - [JParisR](https://github.com/JParisR)
 
 You can also look at the list of all [contributors](https://github.com/your/project/contributors) who have participated in this project.
 
